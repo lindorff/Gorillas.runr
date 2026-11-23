@@ -1,0 +1,71 @@
+[settings]
+theme = 'tokyo-night'
+
+[projects]
+[projects.access_api]
+dir = '$RUNR_ROOT\Gorillas.AccessApi\src\Gorillas.AccessApi'
+cmd = 'dotnet run'
+
+[projects.aks_open]
+dir = '$RUNR_ROOT\Gorillas.AKSOpen\src\Gorillas.AKSOpen.CommunicationService'
+cmd = 'dotnet run'
+ready_url = 'http://localhost:5000/swagger/index.html'
+
+[projects.asset_tool]
+dir = '$RUNR_ROOT\Gorillas.AssetEvaluationTool\Gorillas.AssetEvaluationTool'
+cmd = 'dotnet run'
+depends_on = ['supporting_services', 'aks_open', 'gug_agenthost']
+
+[projects.before_after_cce]
+dir = '$RUNR_ROOT\Gorillas.CloudServices\AzureBatch\scripts\compare'
+cmd = 'pwsh -NoProfile -ExecutionPolicy Bypass -File .\compare-before-after.ps1'
+ready = 'exit'
+color = 'red'
+pty = true
+
+[projects.database_scrambler]
+dir = '$RUNR_ROOT/Gorillas.DatabaseScrambler/Gorillas.DatabaseScrambler/bin/Debug'
+cmd = 'scrambler.exe scramble -db EBH.GuG.DomainModel'
+ready = 'exit'
+
+[projects.gug_admin]
+dir = '$RUNR_ROOT\Gorillas.GugNet\src\Gorillas.GugAdmin.Server'
+cmd = 'dotnet run'
+
+[projects.gug_agenthost]
+dir = '$RUNR_ROOT\Gorillas.Gugnet\src\EBH.GuG.DomainModel.Agenthost'
+cmd = 'dotnet run'
+ready_log = "IsProductionMode: 'False'"
+
+[projects.gugnet]
+dir = '$RUNR_ROOT\Gorillas.Gugnet\src\EBH.Gug.UserApplication'
+cmd = 'dotnet run'
+depends_on = ['gug_agenthost']
+color = 'cyan'
+
+[projects.migrate_db]
+dir = '$RUNR_ROOT\Gorillas.GugNet\db\migr8'
+cmd = 'dbmigrator.exe migrate'
+ready = 'exit'
+color = 'red'
+
+[projects.printservice]
+dir = '$RUNR_ROOT\Gorillas.Gugnet\src\EBH.GuG.Services.PrintService'
+cmd = 'dotnet run'
+color = 'white'
+
+[projects.revert_db]
+dir = '$RUNR_ROOT\dbSnapshot'
+cmd = 'pwsh -NoProfile -ExecutionPolicy Bypass -File .\revertsnapshot.ps1'
+ready = 'exit'
+color = 'bright-red'
+
+[projects.supporting_services]
+dir = '$RUNR_ROOT\Gorillas.SupportingServices\src\Gorillas.SupportingServices.Web.New'
+cmd = 'dotnet run'
+ready_url = 'http://localhost:57185/swagger/index.html'
+color = 'bright-magenta'
+
+[groups]
+AssetTool-Full = ['aks_open', 'asset_tool', 'gug_agenthost', 'supporting_services']
+gug = ['gug_agenthost', 'gugnet']
