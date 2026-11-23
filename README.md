@@ -1,5 +1,11 @@
 # runr
 
+## Gorillas start  
+- Installer Go [link](https://go.dev/dl/)
+- Installer runr - kør i mappen her -  `go install ./cmd/runr`
+- Sæt environment variable `RUNR_ROOT` = path til mappen du har dine git repo's i 
+- Kør runr fra terminalen ved at skrive `runr`
+
 [![CI](https://github.com/Skaanning/runr/actions/workflows/ci.yml/badge.svg)](https://github.com/Skaanning/runr/actions/workflows/ci.yml)
 
 **Your whole dev stack in one terminal.** runr starts the programs you work on (a
