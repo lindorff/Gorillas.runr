@@ -1,9 +1,10 @@
 # runr
 
 ## Gorillas start  
-- Installer Go [link](https://go.dev/dl/)
-- Installer runr - kør i mappen her -  `go install ./cmd/runr`
-- Sæt environment variable `RUNR_ROOT` = path til mappen du har dine git repo's i 
+- Installer Go [link](https://go.dev/dl/) (vi kan også bygge en exe her på github, men så er det en virus ifølge fujitsjus, med go installeret kan vi selv bygge det og så er det ikke en virus 🤓)
+- Installer runr - terminal fra mappen her -  `go install ./cmd/runr`
+- Sæt environment variable `RUNR_ROOT` = path til mappen du har dine git repo's i
+- Kør powershell scriptet i examples/ mappen for at importere gorillas project setup
 - Kør runr fra terminalen ved at skrive `runr`
 
 [![CI](https://github.com/Skaanning/runr/actions/workflows/ci.yml/badge.svg)](https://github.com/Skaanning/runr/actions/workflows/ci.yml)
