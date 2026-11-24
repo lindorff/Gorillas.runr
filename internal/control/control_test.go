@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -274,6 +275,40 @@ func TestLogsFollow(t *testing.T) {
 	}
 	if len(rest) == 0 || rest[len(rest)-1] != "last" || slices.Contains(rest, "not followed") {
 		t.Errorf("after the first line: %q", rest)
+	}
+}
+
+func TestDoContextEndsFollow(t *testing.T) {
+	target := newTarget()
+	target.logs.Append("api", supervisor.Stdout, "old")
+	s := listen(t, shortDir(t), target, 1)
+
+	why := errors.New("nobody reads")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	got := make(chan string, 10)
+	result := make(chan error, 1)
+	go func() {
+		result <- DoContext(ctx, s.Path(), Request{Op: OpLogs, Follow: true}, func(r Reply) error {
+			got <- r.Line.Text
+			return nil
+		})
+	}()
+	select {
+	case l := <-got:
+		if l != "old" {
+			t.Fatalf("got %q", l)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no line arrived")
+	}
+	cancel(why) // while waiting for new lines
+	select {
+	case err := <-result:
+		if err != why {
+			t.Errorf("DoContext = %v, want the cause", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the follow did not end with the context")
 	}
 }
 
