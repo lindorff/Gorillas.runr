@@ -38,7 +38,7 @@ Everything about using runr. For a short introduction, see the [README](../READM
 | `runr group ls` | List groups |
 | `runr theme [name]` | List the color themes (the current one marked with `*`), or set one |
 | `runr status [--json]` | Show the runr sessions running in the background or in other terminals, and their processes (see [Talking to a running session](#talking-to-a-running-session)) |
-| `runr logs [name...] [-n N] [-f] [--errors]` | Print a running session's recent output, or keep following it |
+| `runr logs [name...] [-n N] [-f] [--errors] [--until RE]` | Print a running session's recent output, keep following it, or wait for a line |
 | `runr start\|stop\|restart <name...> [--wait]` | Start, stop or restart projects and groups in a running session; `--wait` reports how it went |
 | `runr down [--force]` | Stop a running session, as `q` does there; `--force` kills its processes |
 | `runr attach [--session <pid>]` | Open the running view of a session running in the background or in another terminal (see [Attaching to a session](#attaching-to-a-session)) |
@@ -501,6 +501,8 @@ runr logs api                 # api's last 100 lines
 runr logs backend -n 0        # everything runr still has of the group's projects
 runr logs --errors            # only error lines (settings.error_pattern) and crashes
 runr logs -f api web          # keep printing new lines until Ctrl+C or the session ends
+runr logs -f api | grep -m1 listening   # ends as soon as grep has its line
+runr logs api --until 'Job .* done'     # wait for a new line that matches, then exit
 ```
 
 ```
@@ -513,7 +515,16 @@ web   running                12m01s  48236  :3000   0       0
 
 `runr logs` prints lines in the [saved logs' format](#saving-logs), without colors; with
 several projects each line starts with the project's display name. It reads what the
-session still has in memory (`scrollback_lines` per project).
+session still has in memory (`scrollback_lines` per project). `-f` follows until Ctrl+C, the
+session ends or nothing reads its output any more (`| head`, `| grep -m1`).
+
+`--until <regexp>` follows until a new line matches, prints it and exits 0: wait for a
+hot reload, a background job or a request without polling. It exits 1 if no line has
+matched within `--timeout` (default 1m, `0` waits for ever) or the session ends first. Only
+lines that arrive after `runr logs` starts count, never the ones it printed first, so a line
+from an earlier run can't end the wait. The expression is matched against a line's text,
+without the time and label, and runr's own lines count too: `--until '^(exited|crashed)'`
+waits until a project's current run is over.
 
 ```bash
 runr restart api --wait       # restart api; wait until it is ready again
@@ -570,12 +581,13 @@ The commands an agent needs:
 | `runr logs api -n 200` | The context around them |
 | `runr restart api --wait` | Restarts api after a change; exit code 0 once it is ready, 1 with its last 20 lines if it crashes, is blocked or isn't ready within `--timeout` (default 1m) |
 | `runr start worker --wait` | Starts a project (and what it needs) in your session |
+| `runr logs api --until 'listening on' --timeout 2m` | Waits for a new line that matches, e.g. after a hot reload or triggering a job; exit code 1 if none came in time |
 | `runr up -d backend` | A session of its own in the background, when none runs; `runr down` stops it afterwards |
 
 Things to tell an agent, or to keep in mind when it uses runr:
 
-- **Never `runr logs -f`**: it follows until the session ends, so the agent's command never
-  returns. `-n` gives it the recent lines instead.
+- **No plain `runr logs -f`**: it follows until the session ends, so the agent's command
+  never returns. `-n` gives it the recent lines, and `--until` waits for a line and exits.
 - **`runr down` stops the whole session.** An agent should only stop a session it started
   itself, and use `--session <pid>` when several run.
 - **Exit codes mean something:** `runr status` exits 1 when no session runs, `restart --wait`
@@ -596,7 +608,9 @@ the developer is watching. Don't start your own servers on the same ports.
   start it yourself in the background with `runr up -d backend` and stop it with
   `runr down` when you're done.
 - Read logs: `runr logs <project> -n 100`; only errors and crashes: `--errors`.
-  Never use `runr logs -f`: it doesn't return.
+  To wait for something to show up in the logs: `runr logs <project> --until '<regexp>'`
+  (exit code 1 if it hasn't within `--timeout`, default 1m). Never plain `runr logs -f`:
+  it doesn't return.
 - After changing a service, restart it and check it came up:
   `runr restart <project> --wait`. On failure it prints the project's last lines.
 - Never `runr down` or `runr stop` a session you didn't start.
