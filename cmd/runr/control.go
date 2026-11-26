@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +23,7 @@ import (
 	"github.com/Skaanning/runr/internal/config"
 	"github.com/Skaanning/runr/internal/control"
 	"github.com/Skaanning/runr/internal/logfile"
+	"github.com/Skaanning/runr/internal/plaintext"
 	"github.com/Skaanning/runr/internal/supervisor"
 	"github.com/Skaanning/runr/internal/tui"
 )
@@ -238,51 +241,107 @@ func startedAt(t, now time.Time) string {
 	return t.Format("Jan 2 15:04")
 }
 
+// errMatched ends a follow once a line matches --until.
+var errMatched = errors.New("a line matched")
+
 func newLogsCmd() *cobra.Command {
 	var lines, pid int
 	var follow, errorsOnly bool
+	var until string
+	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "logs [name...]",
 		Short: "Print the output of a running session's projects",
 		Long: "Print the most recent output of projects in a runr session running in another\n" +
 			"terminal: the given projects and groups, or all of them, interleaved as in the\n" +
-			"combined view, in plain text. -f keeps printing new lines until Ctrl+C or the\n" +
-			"session ends.",
+			"combined view, in plain text. -f keeps printing new lines until Ctrl+C, the\n" +
+			"session ends or nothing reads them any more (| head, | grep -m1).\n\n" +
+			"--until follows until a new line matches a regular expression, then exits;\n" +
+			"with an error if none has within --timeout or the session ends. Only lines\n" +
+			"that arrive after runr logs starts count, not the ones printed before them,\n" +
+			"so an earlier run's line can't match. The expression is matched against a\n" +
+			"line's text, without the time and label; runr's own lines count too, e.g.\n" +
+			"--until '^(exited|crashed|stopped|failed to start)' to wait until a job is\n" +
+			"done.",
 		ValidArgsFunction: completeProjectsAndGroups,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if lines < 0 {
 				return errors.New("--lines can't be negative")
 			}
+			var re *regexp.Regexp
+			if cmd.Flags().Changed("until") {
+				var err error
+				if re, err = regexp.Compile(until); err != nil {
+					return fmt.Errorf("--until: %w", err)
+				}
+				follow = true
+			} else if cmd.Flags().Changed("timeout") {
+				return errors.New("--timeout needs --until")
+			}
+			ignoreBrokenPipe()
+			since := time.Now()
 			names := expandGroups(args)
 			sess, err := control.Pick(runningSessions(cmd.ErrOrStderr()), names, pid)
 			if err != nil {
 				return err
 			}
+			ctx, cancel := context.WithCancelCause(cmd.Context())
+			defer cancel(nil)
+			if re != nil && timeout > 0 {
+				var stop context.CancelFunc
+				ctx, stop = context.WithTimeoutCause(ctx, timeout, fmt.Errorf("no line matched %q within %v", until, timeout))
+				defer stop()
+			}
+			out := cmd.OutOrStdout()
+			if follow {
+				watchOutput(ctx, out, func() { cancel(errOutputGone) })
+			}
 			labels := logLabels(sess.Status, names)
-			w := bufio.NewWriter(cmd.OutOrStdout())
+			w := bufio.NewWriter(out)
 			req := control.Request{Op: control.OpLogs, Names: names, Tail: lines, Errors: errorsOnly, Follow: follow}
-			err = control.Do(sess.Path, req, func(r control.Reply) error {
-				if l := r.Line; l != nil {
+			err = control.DoContext(ctx, sess.Path, req, func(r control.Reply) error {
+				l := r.Line
+				if l != nil {
 					w.WriteString(logfile.Format(l.Time.Local(), labels[l.Project], l.Runr, l.Text))
 					w.WriteByte('\n')
+					if re != nil && !l.Time.Before(since) && re.MatchString(plaintext.StripANSI(l.Text)) {
+						return errMatched
+					}
 				}
 				if follow {
 					return w.Flush()
 				}
 				return nil
 			})
+			matched := errors.Is(err, errMatched)
+			if matched {
+				err = nil
+			}
 			if ferr := w.Flush(); err == nil {
 				err = ferr
 			}
-			if err == nil && follow {
-				fmt.Fprintln(cmd.ErrOrStderr(), "runr: the session ended")
+			if err != nil && ctx.Err() == nil {
+				err = outputError(out, err) // e.g. a failed write, which Do passes on
 			}
-			return err
+			switch {
+			case errors.Is(err, errOutputGone) && re != nil:
+				return fmt.Errorf("no line matched %q before the output was closed", until)
+			case errors.Is(err, errOutputGone):
+				return nil // what head and grep -m1 wanted was printed
+			case err != nil || matched || !follow:
+				return err
+			case re != nil:
+				return fmt.Errorf("the session ended before a line matched %q", until)
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), "runr: the session ended")
+			return nil
 		},
 	}
 	cmd.Flags().IntVarP(&lines, "lines", "n", 100, "print the last this many lines (0: all that are kept)")
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing new lines")
 	cmd.Flags().BoolVar(&errorsOnly, "errors", false, "only lines that look like errors (settings.error_pattern) and crashes")
+	cmd.Flags().StringVar(&until, "until", "", "follow until a new line matches this regular expression, then exit")
+	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --until, give up after this long (0: never)")
 	sessionFlag(cmd, &pid)
 	return cmd
 }

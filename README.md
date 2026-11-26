@@ -68,9 +68,10 @@ Works on Linux, macOS and Windows.
   that way with `runr up -d`); `runr attach` or the launcher brings its running view back.
   `D` and `Q` detach or stop and go to the launcher instead of quitting. Closing the
   terminal without `d` stops the session.
-- **From another terminal or an AI agent:** `runr status`, `runr logs api --errors` and
-  `runr restart api --wait` show and change what a running session is doing, so scripts and
-  coding agents can restart a service and read a crash without copy-paste (see
+- **From another terminal or an AI agent:** `runr status`, `runr logs api --errors`,
+  `runr logs api --until <regexp>` and `runr restart api --wait` show, wait for and change
+  what a running session is doing, so scripts and coding agents can restart a service, wait
+  for a log line and read a crash without copy-paste (see
   [Using runr from an AI coding agent](docs/guide.md#using-runr-from-an-ai-coding-agent)).
 - **Clean shutdowns:** everything stops in reverse dependency order, and a project's
   `stop_cmd` cleans up what it leaves behind when it has to be killed, e.g. Docker containers.

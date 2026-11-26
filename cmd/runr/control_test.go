@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -180,6 +182,99 @@ func TestLogsFollowCommand(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "» stopped") || !strings.Contains(errOut.String(), "the session ended") {
 		t.Errorf("out:\n%s\nerr:\n%s", out, errOut)
+	}
+}
+
+func TestLogsFollowEndsWhenOutputCloses(t *testing.T) {
+	old := goneEvery
+	goneEvery = time.Millisecond
+	t.Cleanup(func() { goneEvery = old })
+	startSession(t)
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	errOut := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		root := newRootCmd()
+		root.SetArgs([]string{"logs", "-f", "api"})
+		root.SetOut(w)
+		root.SetErr(errOut)
+		done <- root.Execute()
+	}()
+	// Like head -1: read a line, then go away while no new lines come.
+	if _, err := bufio.NewReader(r).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	select {
+	case err := <-done:
+		if err != nil || errOut.String() != "" {
+			t.Errorf("err = %v, stderr %q", err, errOut)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("logs -f went on after its output closed")
+	}
+}
+
+func TestLogsUntilCommand(t *testing.T) {
+	sess := startSessionWith(t, map[string]*config.Project{
+		"db":  {Cmd: "exec sleep 30"}, // the session goes on while api restarts
+		"api": {Cmd: "echo api up; exec sleep 30"},
+	}, "db", "api")
+	waitOutput(t, sess.out, "api up")
+
+	// A line printed before runr logs started doesn't count.
+	out, _, err := run(t, "logs", "api", "--until", "^api up$", "--timeout", "300ms")
+	wantErr(t, err, `no line matched "^api up$" within 300ms`)
+	if !strings.Contains(out, "│ api up\n") {
+		t.Errorf("out:\n%s", out)
+	}
+	_, _, err = run(t, "logs", "api", "--timeout", "1s")
+	wantErr(t, err, "--timeout needs --until")
+	_, _, err = run(t, "logs", "api", "--until", "(")
+	wantErr(t, err, "--until: error parsing regexp")
+
+	// A line from the next run does.
+	execute := func(args ...string) (*syncBuffer, chan error) {
+		out := &syncBuffer{}
+		done := make(chan error, 1)
+		go func() {
+			root := newRootCmd()
+			root.SetArgs(args)
+			root.SetOut(out)
+			root.SetErr(io.Discard)
+			done <- root.Execute()
+		}()
+		return out, done
+	}
+	until, done := execute("logs", "api", "--until", "^api up$")
+	waitOutput(t, until, "│ api up") // it started: what follows counts
+	mustRun(t, "restart", "api")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("logs --until did not end when a line matched")
+	}
+	if got := until.String(); strings.Count(got, "│ api up") != 2 || !strings.HasSuffix(got, "│ api up\n") || !strings.Contains(got, "» starting: ") {
+		t.Errorf("out:\n%s", got)
+	}
+
+	// The session ends first.
+	until, done = execute("logs", "api", "--until", "never")
+	waitOutput(t, until, "│ api up")
+	sess.stop()
+	select {
+	case err := <-done:
+		wantErr(t, err, `the session ended before a line matched "never"`)
+	case <-time.After(10 * time.Second):
+		t.Fatal("logs --until did not end with the session")
 	}
 }
 

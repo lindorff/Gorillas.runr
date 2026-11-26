@@ -2,6 +2,7 @@ package control
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,22 +110,32 @@ func (e *dialError) Unwrap() error { return e.err }
 // stopping the session (which takes as long as the shutdown), the whole
 // answer must arrive within a few seconds.
 func Do(path string, req Request, each func(Reply) error) error {
+	return DoContext(context.Background(), path, req, each)
+}
+
+// DoContext is Do, ended early once ctx is done: it then returns ctx's
+// cause (see context.Cause), e.g. to stop following logs.
+func DoContext(ctx context.Context, path string, req Request, each func(Reply) error) error {
 	c, err := net.DialTimeout("unix", path, dialTimeout)
 	if err != nil {
 		return &dialError{err}
 	}
 	defer c.Close()
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
 	if !req.Follow && req.Op != OpDown {
 		c.SetDeadline(time.Now().Add(replyTimeout))
 	}
 	req.V = Version
 	if err := json.NewEncoder(c).Encode(req); err != nil {
-		return err
+		return cmp.Or(context.Cause(ctx), err)
 	}
 	dec := json.NewDecoder(c)
 	for {
 		var r Reply
-		if err := dec.Decode(&r); errors.Is(err, io.EOF) {
+		if err := dec.Decode(&r); ctx.Err() != nil {
+			return context.Cause(ctx)
+		} else if errors.Is(err, io.EOF) {
 			return nil
 		} else if err != nil {
 			return err
