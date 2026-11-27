@@ -70,6 +70,7 @@ type Supervisor struct {
 	// Owned by the loop goroutine.
 	procs    map[string]*managed
 	args     map[string]string // extra arguments by project, see SetArgs
+	dirs     map[string]string // working directories by project, see SetDir
 	cols     int               // pseudo-terminal size, see Resize
 	rows     int
 	order    []string // session order: the order projects were first added
@@ -127,6 +128,7 @@ func New(cfg *config.Config, opts Options) *Supervisor {
 		events:  newEventHub(cfg.Settings.ScrollbackLines()),
 		procs:   map[string]*managed{},
 		args:    map[string]string{},
+		dirs:    map[string]string{},
 		cols:    proc.DefaultCols,
 		rows:    proc.DefaultRows,
 		tracker: opts.Tracker,
@@ -316,6 +318,24 @@ func (s *Supervisor) SetArgs(name, args string) error {
 			delete(s.args, name)
 		} else {
 			s.args[name] = args
+		}
+		return nil
+	})
+}
+
+// SetDir sets the directory a project runs in, instead of its configured
+// dir, from its next start or restart on (e.g. a git worktree of its
+// repository); a blank dir goes back to the configured one. Restarts keep
+// it. The project doesn't have to be in the session yet.
+func (s *Supervisor) SetDir(name, dir string) error {
+	return s.call(func() error {
+		if s.cfg.Projects[name] == nil {
+			return fmt.Errorf("unknown project %q", name)
+		}
+		if dir = strings.TrimSpace(dir); dir == "" {
+			delete(s.dirs, name)
+		} else {
+			s.dirs[name] = dir
 		}
 		return nil
 	})

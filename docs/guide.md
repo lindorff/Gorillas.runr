@@ -24,6 +24,7 @@ Everything about using runr. For a short introduction, see the [README](../READM
 | `runr` | Open the launcher |
 | `runr up <name...> [--log-dir <dir>]` | Start groups and/or projects (plus their dependencies) and open the running view; `--log-dir` also saves each project's output to `<dir>/<project>.log` (see [Saving logs](#saving-logs)) |
 | `runr up -d <name...>` | Start them in the background without opening the running view; `runr attach` shows it (see [Detaching](#detaching)). Works without a terminal |
+| `runr up --worktree <dir> <name...>` | Run the projects of the git repository `<dir>` is in from that work tree, e.g. a `git worktree` (see [Worktrees](#worktrees)); also with `-d` and `--last` |
 | `runr up --last` | Start what the last session started (including what you started later from the running view), with the same extra arguments. Projects or groups since removed are skipped with a warning |
 | `runr add <name> [flags] -- <cmd>` | Register a project |
 | `runr edit <name> [flags] [-- <cmd>]` | Change a project; only the given flags change |
@@ -39,7 +40,7 @@ Everything about using runr. For a short introduction, see the [README](../READM
 | `runr theme [name]` | List the color themes (the current one marked with `*`), or set one |
 | `runr status [--json]` | Show the runr sessions running in the background or in other terminals, and their processes (see [Talking to a running session](#talking-to-a-running-session)) |
 | `runr logs [name...] [-n N] [-f] [--errors] [--until RE]` | Print a running session's recent output, keep following it, or wait for a line |
-| `runr start\|stop\|restart <name...> [--wait]` | Start, stop or restart projects and groups in a running session; `--wait` reports how it went |
+| `runr start\|stop\|restart <name...> [--wait]` | Start, stop or restart projects and groups in a running session; `--wait` reports how it went; `start` and `restart` take `--worktree <dir>` too |
 | `runr down [--force]` | Stop a running session, as `q` does there; `--force` kills its processes |
 | `runr attach [--session <pid>]` | Open the running view of a session running in the background or in another terminal (see [Attaching to a session](#attaching-to-a-session)) |
 | `runr cleanup [--yes]` | Stop processes left running by a runr that was killed (Linux, macOS), then run their projects' `stop_cmd`; asks first unless `--yes` |
@@ -235,6 +236,31 @@ it points: `✓ exists · ~/work/api`.
 If `RUNR_ROOT` isn't set, projects that use it get a warning (`dir: $RUNR_ROOT is not set`)
 and `runr up` refuses to start them; the other projects work as usual.
 
+### Worktrees
+
+`--worktree <dir>` runs projects from another work tree of their repository, such as a
+`git worktree` an agent or a second branch lives in, without changing the config. Each
+project being started (dependencies included) whose `dir` is in the same git repository as
+`<dir>` runs from the same place under that work tree's top-level directory; the others run
+where they are configured:
+
+```bash
+git worktree add ../app-fix fix-login
+runr up backend --worktree ../app-fix     # ~/code/app/src/api runs in ~/code/app-fix/src/api
+runr restart api --worktree ../app-fix    # move one project of a running session there
+runr start worker --worktree ../app-fix   # or add one from it
+```
+
+Any directory inside the work tree will do, so an agent can pass `--worktree .`. runr
+refuses when none of the projects is in that repository, or when a project's directory
+doesn't exist in the work tree (build output that isn't there yet, say). The directory is
+kept for the rest of the session: `r` and `runr restart` run the project there again, and a
+project that was already running moves there when it is restarted. `runr status --json`
+shows it as `dir`, the project's log says `starting: go run . (in ~/code/app-fix/src/api)`,
+and the sidebar shows the work tree's branch. An `env_file` is still read from the
+configured dir (files like `.env` usually aren't checked in), and `runr up --last` starts
+from the configured dirs again.
+
 To keep the shared file itself in one place, point `RUNR_CONFIG` at it. Remember that `env`
 values are in the file too, so leave secrets to an `env_file` that each person keeps.
 
@@ -358,6 +384,7 @@ so for 5 seconds.
 | `e` / `E` | Jump to the next newer / older error line (see [Errors](#errors)) |
 | `esc` | Clear the search and the error position |
 | `PgUp` / `PgDn` | Scroll a page |
+| Mouse wheel | Scroll the output a few lines; hold `Shift` to select text with the mouse, since runr receives the mouse |
 | `g` / `G` (`home` / `end`) | Jump to the top / bottom |
 | `f` | Toggle follow (auto-scroll); scrolling to the bottom resumes it |
 | `w` | Save the output on screen (all of it, or the selected process's) to a file in the current directory (see [Saving logs](#saving-logs)) |
@@ -584,6 +611,8 @@ The commands an agent needs:
 | `runr start worker --wait` | Starts a project (and what it needs) in your session |
 | `runr logs api --until 'listening on' --timeout 2m` | Waits for a new line that matches, e.g. after a hot reload or triggering a job; exit code 1 if none came in time |
 | `runr up -d backend` | A session of its own in the background, when none runs; `runr down` stops it afterwards |
+| `runr up -d backend --worktree .` | The same, run from the agent's git worktree (see [Worktrees](#worktrees)) |
+| `runr restart api --worktree . --wait` | Moves api of a running session to the agent's worktree |
 
 Things to tell an agent, or to keep in mind when it uses runr:
 
@@ -614,6 +643,8 @@ the developer is watching. Don't start your own servers on the same ports.
   it doesn't return.
 - After changing a service, restart it and check it came up:
   `runr restart <project> --wait`. On failure it prints the project's last lines.
+- Working in a git worktree? Add `--worktree .` to `runr up`, `runr start` and
+  `runr restart` so the services run your worktree's code, not the main checkout's.
 - Never `runr down` or `runr stop` a session you didn't start.
 ```
 

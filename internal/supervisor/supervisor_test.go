@@ -425,6 +425,52 @@ func TestSetArgs(t *testing.T) {
 	}
 }
 
+func TestSetDir(t *testing.T) {
+	s, r := newTestSupervisor(t, map[string]string{"api": "cat marker"})
+	if err := s.SetDir("nope", t.TempDir()); err == nil {
+		t.Error("SetDir accepted an unknown project")
+	}
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "marker"), []byte("from other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDir("api", " "+other+" "); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start("api"); err != nil {
+		t.Fatal(err)
+	}
+	if info := r.waitState(t, "api", Exited); info.Dir != other {
+		t.Errorf("Dir = %q, want %q", info.Dir, other)
+	}
+	waitLog(t, s, "api", "sys:starting: cat marker (in "+other+")")
+	waitLog(t, s, "api", "out:from other")
+
+	// A restart keeps the dir.
+	if err := s.Restart("api"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); countLines(logLines(s, "api"), "out:from other") < 2; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no second run in %s; logs %q", other, logLines(s, "api"))
+		}
+	}
+	r.waitState(t, "api", Exited)
+
+	// Blank: back to the configured dir, which has no marker.
+	if err := s.SetDir("api", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Restart("api"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); countLines(logLines(s, "api"), "sys:starting: cat marker") < 1; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no start in the configured dir; logs %q", logLines(s, "api"))
+		}
+	}
+}
+
 func TestRestart(t *testing.T) {
 	s, r := newTestSupervisor(t, map[string]string{"api": "echo run; sleep 30"})
 	if err := s.Start("api"); err != nil {

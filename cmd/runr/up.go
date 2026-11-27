@@ -22,7 +22,7 @@ import (
 
 func newUpCmd() *cobra.Command {
 	var plain, last, detach, inProcess bool
-	var logDirFlag string
+	var logDirFlag, worktree string
 	cmd := &cobra.Command{
 		Use:   "up <name...>",
 		Short: "Start groups and/or projects",
@@ -30,7 +30,11 @@ func newUpCmd() *cobra.Command {
 			"the running view. d there leaves the session running in the background (runr\n" +
 			"attach shows it again); closing the terminal without d stops it, as q does.\n\n" +
 			"With -d, start the session in the background without showing it.\n" +
-			"With --last, start what the last session started, with the same extra arguments.",
+			"With --last, start what the last session started, with the same extra arguments.\n\n" +
+			"With --worktree <dir>, the projects in the same git repository as <dir> run from\n" +
+			"that work tree instead: from the same place under its top-level directory, e.g.\n" +
+			"~/wt/fix/src/api for a project in ~/code/app/src/api. Restarts keep running\n" +
+			"there. Projects of other repositories run as configured.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if last {
 				if len(args) > 0 {
@@ -58,7 +62,13 @@ func newUpCmd() *cobra.Command {
 					return err
 				}
 			}
-			projects, err := prepareUp(s.cfg, args, cmd.ErrOrStderr())
+			if worktree != "" {
+				// The host runs elsewhere: it gets the absolute path.
+				if worktree, err = filepath.Abs(worktree); err != nil {
+					return err
+				}
+			}
+			projects, dirs, err := prepareUpIn(s.cfg, args, worktree, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -82,14 +92,14 @@ func newUpCmd() *cobra.Command {
 			left := leftoversFor(orphans, s.cfg, s.cfg.Settings.ShutdownTimeout())
 			switch {
 			case detach:
-				h, err := startHost(args, hostOptions{logDir: dir, args: extra})
+				h, err := startHost(args, hostOptions{logDir: dir, args: extra, worktree: worktree})
 				if err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "started session %d · runr attach to watch it\n", h.pid)
 				return nil
 			case !plain && tty && !inProcess && hostSupported:
-				return upHosted(stderr, args, hostOptions{logDir: dir, args: extra, hold: left != nil, forView: true}, left)
+				return upHosted(stderr, args, hostOptions{logDir: dir, args: extra, worktree: worktree, hold: left != nil, forView: true}, left)
 			}
 
 			// In this process: this session's processes are recorded for
@@ -101,15 +111,17 @@ func newUpCmd() *cobra.Command {
 			signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer signal.Stop(sigs)
 			if plain || !tty {
-				return runPlain(cmd.OutOrStdout(), s.cfg, opts, args, extra, projects, sigs, colorsFor(cmd.OutOrStdout()))
+				return runPlain(cmd.OutOrStdout(), s.cfg, opts, args, extra, dirs, projects, sigs, colorsFor(cmd.OutOrStdout()))
 			}
-			return runTUI(stderr, s.cfg, opts, args, extra, left, sigs)
+			return runTUI(stderr, s.cfg, opts, args, extra, dirs, left, sigs)
 		},
 	}
 	cmd.Flags().BoolVar(&last, "last", false, "start what the last session started, with the same extra arguments")
 	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "start the session in the background (runr attach shows it)")
 	cmd.Flags().StringVar(&logDirFlag, "log-dir", "", "append each project's output to <dir>/<project>.log (overrides settings.log_dir)")
 	_ = cmd.MarkFlagDirname("log-dir")
+	cmd.Flags().StringVar(&worktree, "worktree", "", "run the projects of the git repository <dir> is in from that work tree")
+	_ = cmd.MarkFlagDirname("worktree")
 	// Plain interleaved output, for debugging and non-interactive use.
 	cmd.Flags().BoolVar(&plain, "plain", false, "print interleaved output instead of opening the TUI")
 	_ = cmd.Flags().MarkHidden("plain")
@@ -136,25 +148,22 @@ func upHosted(stderr io.Writer, names []string, o hostOptions, left *tui.Leftove
 	return runAttached(stderr, r, left)
 }
 
-// runTUI starts the projects, with extra arguments by project, and shows
+// runTUI starts the projects, with extra arguments and directories by
+// project, and shows
 // the running view until the user quits. Projects that ended crashed or
 // blocked are listed on stderr afterwards, since the TUI's screen is gone
 // by then.
 //
 // With left set, the projects start once the question about those
 // leftover processes is answered.
-func runTUI(stderr io.Writer, cfg *config.Config, opts supervisor.Options, names []string, args map[string]string, left *tui.Leftovers, sigs chan os.Signal) error {
+func runTUI(stderr io.Writer, cfg *config.Config, opts supervisor.Options, names []string, args, dirs map[string]string, left *tui.Leftovers, sigs chan os.Signal) error {
 	sess := newRecordingSession(cfg, opts)
 	stopControl := serveControl(sess, cfg, names, sigs)
 	var err error
 	if left == nil {
-		err = sess.begin(names, args)
+		err = sess.begin(names, args, dirs)
 	} else {
-		for name, a := range args {
-			if err = sess.SetArgs(name, a); err != nil {
-				break
-			}
-		}
+		err = sess.configure(args, dirs)
 	}
 	if err == nil {
 		err = tui.Run(sess, cfg, names, gitReader(), left, sigs)
@@ -224,16 +233,30 @@ func summarize(infos []supervisor.ProcessInfo) string {
 // started can be: names resolve and working directories exist. It returns
 // the resolved projects in start order.
 func prepareUp(cfg *config.Config, names []string, stderr io.Writer) ([]string, error) {
+	projects, _, err := prepareUpIn(cfg, names, "", stderr)
+	return projects, err
+}
+
+// prepareUpIn is prepareUp for starting in a git worktree (none if ""):
+// it also returns the directories of the projects that run in it (see
+// worktreeDirs), whose configured dirs then don't have to exist.
+func prepareUpIn(cfg *config.Config, names []string, worktree string, stderr io.Writer) ([]string, map[string]string, error) {
 	warnings, err := cfg.Validate()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	projects, err := cfg.Resolve(names...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(projects) == 0 {
-		return nil, fmt.Errorf("nothing to start: %s contains no projects", strings.Join(names, ", "))
+		return nil, nil, fmt.Errorf("nothing to start: %s contains no projects", strings.Join(names, ", "))
+	}
+	var dirs map[string]string
+	if worktree != "" {
+		if dirs, err = worktreeDirs(cfg, projects, worktree); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	inSet := map[string]bool{}
@@ -242,7 +265,7 @@ func prepareUp(cfg *config.Config, names []string, stderr io.Writer) ([]string, 
 	}
 	var missing []string
 	for _, w := range warnings {
-		if !inSet[w.Name] {
+		if !inSet[w.Name] || w.Field == "dir" && dirs[w.Name] != "" {
 			continue
 		}
 		if w.Field == "dir" {
@@ -252,9 +275,9 @@ func prepareUp(cfg *config.Config, names []string, stderr io.Writer) ([]string, 
 		}
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("cannot start:\n  %s", strings.Join(missing, "\n  "))
+		return nil, nil, fmt.Errorf("cannot start:\n  %s", strings.Join(missing, "\n  "))
 	}
-	return projects, nil
+	return projects, dirs, nil
 }
 
 // completeProjectsAndGroups offers every project and group name.

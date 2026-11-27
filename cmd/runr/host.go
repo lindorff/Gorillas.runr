@@ -34,7 +34,7 @@ var (
 )
 
 func newHostCmd() *cobra.Command {
-	var logDirFlag string
+	var logDirFlag, worktree string
 	var argList []string
 	var hold bool
 	var viewWithin time.Duration
@@ -56,7 +56,8 @@ func newHostCmd() *cobra.Command {
 				return err
 			}
 			// Warnings were shown by the runr that started the host.
-			if _, err := prepareUp(s.cfg, names, io.Discard); err != nil {
+			_, dirs, err := prepareUpIn(s.cfg, names, worktree, io.Discard)
+			if err != nil {
 				return err
 			}
 			dir, err := logDir(s.cfg, logDirFlag)
@@ -72,7 +73,7 @@ func newHostCmd() *cobra.Command {
 			sigs := make(chan os.Signal, 2)
 			signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 			defer signal.Stop(sigs)
-			if err := runHost(s.cfg, opts, names, args, hold, viewWithin, sigs); err != nil {
+			if err := runHost(s.cfg, opts, names, args, dirs, hold, viewWithin, sigs); err != nil {
 				return err
 			}
 			removeHostLog(os.Getpid()) // nothing went wrong: nothing to keep
@@ -81,6 +82,7 @@ func newHostCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&logDirFlag, "log-dir", "", "append each project's output to <dir>/<project>.log")
 	cmd.Flags().StringArrayVar(&argList, "arg", nil, "extra arguments of a project, as name=args")
+	cmd.Flags().StringVar(&worktree, "worktree", "", "run the projects of that work tree's repository from it (see runr up)")
 	cmd.Flags().BoolVar(&hold, "hold", false, "start nothing until a view starts it (after the leftovers question)")
 	cmd.Flags().DurationVar(&viewWithin, "view-within", 0, "stop if no view has attached by then (0: never)")
 	return cmd
@@ -99,23 +101,20 @@ func parseArgList(items []string) (map[string]string, error) {
 	return out, nil
 }
 
-// runHost starts names (with hold, only sets their extra arguments) and
+// runHost starts names (with hold, only sets their extra arguments and
+// directories) and
 // serves the session until it is stopped: by a signal on sigs (runr down
 // sends one, a second one kills), by a view (q), or by the last view going
 // away without detaching. With viewWithin, it stops if no view has
 // attached by then.
-func runHost(cfg *config.Config, opts supervisor.Options, names []string, args map[string]string, hold bool, viewWithin time.Duration, sigs chan os.Signal) error {
+func runHost(cfg *config.Config, opts supervisor.Options, names []string, args, dirs map[string]string, hold bool, viewWithin time.Duration, sigs chan os.Signal) error {
 	sess := newRecordingSession(cfg, opts)
 	sup := sess.Supervisor
 	var err error
 	if hold {
-		for name, a := range args {
-			if err = sess.SetArgs(name, a); err != nil {
-				break
-			}
-		}
+		err = sess.configure(args, dirs)
 	} else {
-		err = sess.begin(names, args)
+		err = sess.begin(names, args, dirs)
 	}
 	if err != nil {
 		sup.Close()
@@ -208,10 +207,11 @@ type host struct {
 
 // hostOptions are what a host is started with besides the names.
 type hostOptions struct {
-	logDir  string            // for persistent logs; "": none
-	args    map[string]string // extra arguments by project
-	hold    bool              // a view starts the projects (see runHost)
-	forView bool              // a view will attach right away: stop if none does
+	logDir   string            // for persistent logs; "": none
+	args     map[string]string // extra arguments by project
+	worktree string            // absolute; run the projects of its repository from it (see worktreeDirs); "": none
+	hold     bool              // a view starts the projects (see runHost)
+	forView  bool              // a view will attach right away: stop if none does
 }
 
 // startHost starts a session host for names in a session of its own,
@@ -240,6 +240,9 @@ func startHost(names []string, o hostOptions) (*host, error) {
 	}
 	for _, name := range slices.Sorted(maps.Keys(o.args)) {
 		argv = append(argv, "--arg="+name+"="+o.args[name])
+	}
+	if o.worktree != "" {
+		argv = append(argv, "--worktree="+o.worktree)
 	}
 	if o.hold {
 		argv = append(argv, "--hold")

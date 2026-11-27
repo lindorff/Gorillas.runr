@@ -69,6 +69,10 @@ type Request struct {
 	Errors bool     `json:"errors,omitempty"` // logs: only error lines
 	Follow bool     `json:"follow,omitempty"` // logs: keep sending new lines
 	Force  bool     `json:"force,omitempty"`  // down: kill instead of stopping gracefully
+
+	// Dirs are directories to run projects in instead of their configured
+	// ones, by project (start, restart): set before they start, and kept.
+	Dirs map[string]string `json:"dirs,omitempty"`
 }
 
 // Reply is one line of a session's answer: an error, or one of the others.
@@ -109,6 +113,7 @@ type Process struct {
 	Restarts  int       `json:"restarts"`            // starts after the first
 	Errors    int       `json:"errors"`              // error lines of the most recent run
 	Args      string    `json:"args,omitempty"`      // extra arguments
+	Dir       string    `json:"dir,omitempty"`       // where it runs, when not its configured dir
 	Ports     []int     `json:"ports,omitempty"`     // listening TCP ports, if they can be read
 }
 

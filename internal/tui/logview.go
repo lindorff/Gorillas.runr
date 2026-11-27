@@ -139,6 +139,57 @@ func (v *logView) pageDown() {
 	v.setAnchor(min(line, len(v.lines)-1), row, true)
 }
 
+// scrollUp moves the view n rows towards older lines.
+func (v *logView) scrollUp(n int) {
+	v.render()
+	if v.atTop || v.first < 0 || n <= 0 {
+		return
+	}
+	line := v.first
+	row := clampRow(v.firstRow, v.format(v.lines[line], v.width))
+	for ; n > 0; n-- {
+		if row > 0 {
+			row--
+		} else if line > 0 {
+			line--
+			row = len(v.format(v.lines[line], v.width)) - 1
+		} else {
+			break
+		}
+	}
+	v.follow = false
+	v.setAnchor(line, max(row, 0), true)
+}
+
+// scrollDown moves the view n rows towards newer lines; reaching the end
+// follows them again.
+func (v *logView) scrollDown(n int) {
+	v.render()
+	if v.follow || v.first < 0 || n <= 0 {
+		return
+	}
+	line := v.first
+	rows := len(v.format(v.lines[line], v.width))
+	row := max(min(v.firstRow, rows-1), 0)
+	for ; n > 0; n-- {
+		if row+1 < rows {
+			row++
+		} else if line+1 < len(v.lines) {
+			line++
+			row, rows = 0, len(v.format(v.lines[line], v.width))
+		} else {
+			break
+		}
+	}
+	v.setAnchor(line, row, true)
+	// render follows again if the lines run out before the bottom edge;
+	// the newest row just reaching it does too.
+	v.render()
+	if n := len(v.lines) - 1; !v.follow && v.last == n && v.lastRow >= len(v.format(v.lines[n], v.width))-1 {
+		v.scrollBottom()
+	}
+}
+
 func (v *logView) scrollTop() {
 	v.follow = false
 	v.setAnchor(0, 0, true)

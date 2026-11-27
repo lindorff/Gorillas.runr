@@ -40,14 +40,30 @@ func (s recordingSession) SetArgs(name, args string) error {
 	return nil
 }
 
-// begin sets extra arguments, then starts names.
-func (s recordingSession) begin(names []string, args map[string]string) error {
+// begin sets extra arguments and directories (see configure), then starts
+// names.
+func (s recordingSession) begin(names []string, args, dirs map[string]string) error {
+	if err := s.configure(args, dirs); err != nil {
+		return err
+	}
+	return s.Start(names...)
+}
+
+// configure sets extra arguments, which are recorded, and directories to
+// run projects in instead of their configured ones (--worktree), which
+// aren't: a worktree is usually gone before the session is started again.
+func (s recordingSession) configure(args, dirs map[string]string) error {
 	for name, a := range args {
 		if err := s.SetArgs(name, a); err != nil {
 			return err
 		}
 	}
-	return s.Start(names...)
+	for name, d := range dirs {
+		if err := s.SetDir(name, d); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // stateDir is runr's state directory, or "" if it can't be found (then

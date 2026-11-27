@@ -94,6 +94,39 @@ func TestPaneModesAndBorders(t *testing.T) {
 	}
 }
 
+func TestWheelScrollsLog(t *testing.T) {
+	m, sess := newPaneModel(t, 90, 10)
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("MouseMode = %v: the terminal would send the wheel as arrow keys", mode)
+	}
+	var events []supervisor.Event
+	for range 20 {
+		events = append(events, emit(sess, "db", "line"))
+	}
+	m.Update(eventsMsg{events: events})
+	selected := m.selected
+
+	m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.view().following() {
+		t.Error("still following after the wheel went up")
+	}
+	if m.selected != selected {
+		t.Errorf("the wheel selected project %d, was %d", m.selected, selected)
+	}
+	m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if !m.view().following() {
+		t.Error("not following after the wheel came back down")
+	}
+
+	// While a picker is open, the wheel leaves the log alone.
+	m.Update(key("+"))
+	m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	m.Update(key("esc"))
+	if !m.view().following() {
+		t.Error("the wheel scrolled the log behind the picker")
+	}
+}
+
 func TestStatusBarNarrows(t *testing.T) {
 	st := newStyles(terminalTheme)
 	b := statusBar{mode: "FOLLOW", color: st.pal.accent, title: "backend + web", info: "● 2", project: "api · main", clock: "14:32"}

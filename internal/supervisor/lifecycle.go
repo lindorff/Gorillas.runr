@@ -26,11 +26,16 @@ func (s *Supervisor) spawn(m *managed) {
 	m.info.Pid = 0
 	m.info.Errors, m.outputErrors, m.failures = 0, 0, 0
 	m.info.Args = s.args[m.name]
+	m.info.Dir = s.dirs[m.name]
 	command := m.project.CommandWith(m.info.Args)
 
 	// Logged before spawning so it precedes the process's first output.
-	s.system(m, "starting: %s", command)
-	spec, err := s.spec(m.project, command)
+	if m.info.Dir != "" {
+		s.system(m, "starting: %s (in %s)", command, m.info.Dir)
+	} else {
+		s.system(m, "starting: %s", command)
+	}
+	spec, err := s.spec(m.project, command, m.info.Dir)
 	if err == nil {
 		m.proc, err = proc.Start(spec, s.lineHandler(m))
 	}
@@ -278,7 +283,7 @@ func (s *Supervisor) runStopCmd(m *managed, status proc.ExitStatus) {
 		s.setState(m, Stopping)
 	}
 	s.system(m, "running stop_cmd: %s", m.project.StopCmd)
-	spec, err := StopSpec(m.project, "", s.baseEnv, s.timeout)
+	spec, err := StopSpec(m.project, m.info.Dir, s.baseEnv, s.timeout)
 	var p *proc.Process
 	if err == nil {
 		p, err = proc.Start(spec, s.stopCmdLines(m))
@@ -325,10 +330,11 @@ func (s *Supervisor) stopCmdLines(m *managed) func(proc.Line) {
 	}
 }
 
-// spec builds the process spec for a project running command: resolved dir
-// and the layered environment (base, runr defaults, env_file, env).
-func (s *Supervisor) spec(p *config.Project, command string) (proc.Spec, error) {
-	spec, err := commandSpec(p, command, "", s.baseEnv, p.PTY, s.timeout)
+// spec builds the process spec for a project running command: in dir (the
+// project's resolved dir if "") with the layered environment (base, runr
+// defaults, env_file, env).
+func (s *Supervisor) spec(p *config.Project, command, dir string) (proc.Spec, error) {
+	spec, err := commandSpec(p, command, dir, s.baseEnv, p.PTY, s.timeout)
 	spec.Cols, spec.Rows = s.cols, s.rows
 	return spec, err
 }

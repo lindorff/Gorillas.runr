@@ -336,7 +336,13 @@ func (m *runningModel) gitDirs() map[string]string {
 	for _, e := range m.entries {
 		names = append(names, e.info.Name)
 	}
-	return projectDirs(m.cfg, names)
+	dirs := projectDirs(m.cfg, names)
+	for _, e := range m.entries {
+		if e.info.Dir != "" { // e.g. a git worktree: its branch is shown
+			dirs[e.info.Name] = e.info.Dir
+		}
+	}
+	return dirs
 }
 
 // waitEvents returns a command that delivers the next batch of supervisor
@@ -515,6 +521,8 @@ func (m *runningModel) update(msg tea.Msg) tea.Cmd {
 		}
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.MouseWheelMsg:
+		m.wheel(msg)
 	case interruptMsg:
 		return m.interrupt()
 	case stoppedMsg:
@@ -722,7 +730,7 @@ func (m *runningModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "c":
 		if e := m.selectedEntry(); e != nil {
 			var cmd tea.Cmd
-			m.notice, cmd = copyCommand(m.cfg, e.info.Name, e.info.Args)
+			m.notice, cmd = copyCommand(m.cfg, e.info.Name, e.info.Args, e.info.Dir)
 			return cmd
 		}
 	case "r":
@@ -743,6 +751,25 @@ func (m *runningModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.view().toggleFollow()
 	}
 	return nil
+}
+
+// wheelRows is how many rows a step of the mouse wheel scrolls the log.
+const wheelRows = 3
+
+// wheel scrolls the log with the mouse wheel, unless a question, picker or
+// input is open. (Without mouse reporting, terminals send the wheel as the
+// arrow keys, which select projects.)
+func (m *runningModel) wheel(msg tea.MouseWheelMsg) {
+	v := m.view()
+	if v == nil || m.confirm != nil || m.picker != nil || m.editing || m.argsFor != "" {
+		return
+	}
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		v.scrollUp(wheelRows)
+	case tea.MouseWheelDown:
+		v.scrollDown(wheelRows)
+	}
 }
 
 // handlePickerKey handles keys while a picker is open.
