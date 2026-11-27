@@ -64,6 +64,8 @@ Works on Linux, macOS and Windows.
   answer its prompts, e.g. a script that asks for a branch name.
 - **Shared configs:** write project directories as `$RUNR_ROOT/api`, so a team can share one
   config while everyone keeps their checkouts in a different place.
+- **Worktrees:** `runr up backend --worktree ../app-fix` runs the projects of that repository
+  from a `git worktree` instead, handy for coding agents working in one.
 - **Detach and come back:** `d` leaves a session running in the background (or start it
   that way with `runr up -d`); `runr attach` or the launcher brings its running view back.
   `D` and `Q` detach or stop and go to the launcher instead of quitting. Closing the

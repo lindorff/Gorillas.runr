@@ -291,6 +291,7 @@ func (m *runningModel) formatSingle(line supervisor.LogLine, width int) []string
 func (m *runningModel) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion // the wheel scrolls the log (see wheel)
 	v.WindowTitle = "runr · " + strings.Join(m.titles, " + ")
 	v.ForegroundColor, v.BackgroundColor = m.st.screen()
 	return v

@@ -22,7 +22,7 @@ func TestRecordingSession(t *testing.T) {
 	sess := newRecordingSession(cfg, supervisor.Options{})
 	defer sess.Close()
 
-	if err := sess.begin([]string{"api"}, map[string]string{"api": "--v", "web": ""}); err != nil {
+	if err := sess.begin([]string{"api"}, map[string]string{"api": "--v", "web": ""}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Start("nope"); err == nil {

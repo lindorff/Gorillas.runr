@@ -264,7 +264,7 @@ func (m *launcherModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			if it, ok := m.current(); ok && !it.group {
 				var cmd tea.Cmd
-				m.notice, cmd = copyCommand(m.cfg, it.name, "")
+				m.notice, cmd = copyCommand(m.cfg, it.name, "", "")
 				return m, cmd
 			}
 		}

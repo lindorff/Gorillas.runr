@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"slices"
@@ -26,6 +27,7 @@ type Target interface {
 	Start(names ...string) error
 	Stop(name string) error
 	Restart(name string) error
+	SetDir(name, dir string) error
 }
 
 // Info is what a Server says about its session besides the processes.
@@ -236,6 +238,13 @@ func (s *Server) act(req Request) error {
 	if len(req.Names) == 0 {
 		return fmt.Errorf("no projects to %s", req.Op)
 	}
+	if req.Op != OpStop {
+		for _, name := range slices.Sorted(maps.Keys(req.Dirs)) {
+			if err := s.target.SetDir(name, req.Dirs[name]); err != nil {
+				return err
+			}
+		}
+	}
 	if req.Op == OpStart {
 		return s.target.Start(req.Names...) // also groups, and projects not in the session yet
 	}
@@ -273,6 +282,7 @@ func (s *Server) status() Status {
 			Restarts:  in.Restarts,
 			Errors:    in.Errors,
 			Args:      in.Args,
+			Dir:       in.Dir,
 			Ports:     listening[in.Name],
 		}
 		if l := s.info.Labels[in.Name]; l != "" {

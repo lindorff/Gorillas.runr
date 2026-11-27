@@ -62,7 +62,9 @@ func startPlain(t *testing.T, cfg *config.Config, names ...string) (*syncBuffer,
 	out := &syncBuffer{}
 	sigs := make(chan os.Signal, 2)
 	result := make(chan error, 1)
-	go func() { result <- runPlain(out, cfg, supervisor.Options{}, names, nil, projects, sigs, plainColors{}) }()
+	go func() {
+		result <- runPlain(out, cfg, supervisor.Options{}, names, nil, nil, projects, sigs, plainColors{})
+	}()
 	return out, sigs, result
 }
 
@@ -286,7 +288,7 @@ func TestPlainLogDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runPlain(&syncBuffer{}, cfg, supervisor.Options{LogDir: logs}, []string{"api"}, nil, projects, make(chan os.Signal), plainColors{})
+	err = runPlain(&syncBuffer{}, cfg, supervisor.Options{LogDir: logs}, []string{"api"}, nil, nil, projects, make(chan os.Signal), plainColors{})
 	if err == nil {
 		t.Error("a crash should fail the run")
 	}

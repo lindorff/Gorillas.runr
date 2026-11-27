@@ -395,16 +395,30 @@ func newActionCmd(a action) *cobra.Command {
 	var wait bool
 	var timeout time.Duration
 	var pid int
+	var worktree string
+	long := a.long + "\n\nWith --wait, runr waits until they are ready (stopped, for stop), and exits\n" +
+		"with an error, printing a project's last lines, if one crashes, is blocked or\n" +
+		"isn't done before --timeout."
+	if a.op != control.OpStop {
+		long += "\n\nWith --worktree <dir>, the projects in the same git repository as <dir> run from\n" +
+			"that work tree from now on (see runr up --worktree). One that is running already\n" +
+			"moves there when it is restarted."
+	}
 	cmd := &cobra.Command{
-		Use:   a.op + " <name...>",
-		Short: a.short,
-		Long: a.long + "\n\nWith --wait, runr waits until they are ready (stopped, for stop), and exits\n" +
-			"with an error, printing a project's last lines, if one crashes, is blocked or\n" +
-			"isn't done before --timeout.",
+		Use:               a.op + " <name...>",
+		Short:             a.short,
+		Long:              long,
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeProjectsAndGroups,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targets := expandGroups(args)
+			var dirs map[string]string
+			if worktree != "" {
+				var err error
+				if dirs, err = actionWorktreeDirs(a.op, args, targets, worktree); err != nil {
+					return err
+				}
+			}
 			sessions := runningSessions(cmd.ErrOrStderr())
 			sess, err := control.Pick(sessions, targets, pid)
 			var noMatch *control.NoMatchError
@@ -422,7 +436,7 @@ func newActionCmd(a action) *cobra.Command {
 			if a.op == control.OpStart {
 				names = args // groups too: the session pulls in dependencies
 			}
-			if err := control.Do(sess.Path, control.Request{Op: a.op, Names: names}, func(control.Reply) error { return nil }); err != nil {
+			if err := control.Do(sess.Path, control.Request{Op: a.op, Names: names, Dirs: dirs}, func(control.Reply) error { return nil }); err != nil {
 				return err
 			}
 			if !wait {
@@ -433,8 +447,29 @@ func newActionCmd(a action) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until they are ready (stop: stopped) and report how it went")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --wait, give up after this long")
+	if a.op != control.OpStop {
+		cmd.Flags().StringVar(&worktree, "worktree", "", "run the projects of the git repository <dir> is in from that work tree")
+		_ = cmd.MarkFlagDirname("worktree")
+	}
 	sessionFlag(cmd, &pid)
 	return cmd
+}
+
+// actionWorktreeDirs returns the directories for runr start or restart
+// --worktree (see worktreeDirs): of the projects started, with their
+// dependencies, or of those restarted.
+func actionWorktreeDirs(op string, args, targets []string, worktree string) (map[string]string, error) {
+	s, err := loadStore()
+	if err != nil {
+		return nil, err
+	}
+	projects := targets
+	if op == control.OpStart {
+		if projects, err = s.cfg.Resolve(args...); err != nil {
+			return nil, err
+		}
+	}
+	return worktreeDirs(s.cfg, projects, worktree)
 }
 
 // outcome tells whether a process is done with what op asked of it, and

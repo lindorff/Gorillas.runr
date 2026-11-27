@@ -134,7 +134,7 @@ func runLauncherWith(stderr io.Writer, s *store, first *control.Remote, left *tu
 		opts := supervisor.Options{LogDir: dir}
 		rec = track(sessionsDir(), &opts)
 		sess := newRecordingSession(s.cfg, opts)
-		if err := sess.begin(names, args); err != nil {
+		if err := sess.begin(names, args, nil); err != nil {
 			sess.Close()
 			rec.Close()
 			return nil, err

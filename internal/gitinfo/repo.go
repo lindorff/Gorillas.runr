@@ -16,8 +16,9 @@ var ErrNotRepo = errors.New("not in a git repository")
 
 // Repo is a git work tree.
 type Repo struct {
-	Root   string // top-level directory of the work tree
-	GitDir string // its git directory (for a linked worktree, the worktree's own)
+	Root      string // top-level directory of the work tree
+	GitDir    string // its git directory (for a linked worktree, the worktree's own)
+	CommonDir string // the git directory its worktrees share: the same for every work tree of a repository
 }
 
 // Find returns the work tree containing dir.
@@ -28,7 +29,7 @@ func (g *Git) Find(ctx context.Context, dir string) (Repo, error) {
 		return Repo{}, fmt.Errorf("dir %s is not a directory", dir)
 	}
 	// LC_ALL=C: the "not a git repository" message is matched below.
-	out, err := g.run(ctx, dir, []string{"LC_ALL=C"}, "rev-parse", "--show-toplevel", "--absolute-git-dir")
+	out, err := g.run(ctx, dir, []string{"LC_ALL=C"}, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
 	if err != nil {
 		var gitErr *Error
 		if errors.As(err, &gitErr) && strings.Contains(gitErr.Stderr, "not a git repository") {
@@ -37,14 +38,22 @@ func (g *Git) Find(ctx context.Context, dir string) (Repo, error) {
 		return Repo{}, err
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) != 2 {
+	if len(lines) != 3 {
 		return Repo{}, fmt.Errorf("git rev-parse: unexpected output %q", out)
 	}
-	// git prints forward slashes on Windows too.
-	return Repo{
-		Root:   filepath.Clean(filepath.FromSlash(strings.TrimSpace(lines[0]))),
-		GitDir: filepath.Clean(filepath.FromSlash(strings.TrimSpace(lines[1]))),
-	}, nil
+	// git prints forward slashes on Windows too, and the common dir
+	// relative to dir unless it is elsewhere.
+	path := func(line string) string { return filepath.Clean(filepath.FromSlash(strings.TrimSpace(line))) }
+	common := path(lines[2])
+	if !filepath.IsAbs(common) {
+		// Real like the other two (dir may have symlinks, or 8.3 names
+		// on Windows), so that work trees of a repository compare equal.
+		common = filepath.Join(dir, common)
+		if real, err := filepath.EvalSymlinks(common); err == nil {
+			common = real
+		}
+	}
+	return Repo{Root: path(lines[0]), GitDir: path(lines[1]), CommonDir: common}, nil
 }
 
 // Repos says which repository each of a set of projects belongs to.

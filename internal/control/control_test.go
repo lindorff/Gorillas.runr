@@ -42,6 +42,9 @@ func (f *fakeTarget) record(call, name string) error {
 func (f *fakeTarget) Start(names ...string) error { return f.record("start", strings.Join(names, ",")) }
 func (f *fakeTarget) Stop(name string) error      { return f.record("stop", name) }
 func (f *fakeTarget) Restart(name string) error   { return f.record("restart", name) }
+func (f *fakeTarget) SetDir(name, dir string) error {
+	return f.record("dir", name+"="+dir)
+}
 
 func (f *fakeTarget) recorded() []string {
 	f.mu.Lock()
@@ -66,7 +69,7 @@ func newTarget() *fakeTarget {
 	return &fakeTarget{
 		procs: []supervisor.ProcessInfo{
 			{Name: "db", State: supervisor.Running, Pid: 100, StartedAt: started},
-			{Name: "api", State: supervisor.Crashed, Pid: 200, StartedAt: started, Exit: proc.ExitStatus{Code: 1}, Restarts: 2, Errors: 1, Args: "--verbose"},
+			{Name: "api", State: supervisor.Crashed, Pid: 200, StartedAt: started, Exit: proc.ExitStatus{Code: 1}, Restarts: 2, Errors: 1, Args: "--verbose", Dir: "/wt/api"},
 		},
 		pids: map[string][]int{"db": {100, 101}},
 		logs: supervisor.NewLogs(100),
@@ -147,7 +150,7 @@ func TestStatus(t *testing.T) {
 	started := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
 	want := []Process{
 		{Name: "db", Label: "db", State: "running", Pid: 100, StartedAt: started, Ports: []int{80, 5432}},
-		{Name: "api", Label: "API", State: "crashed", StartedAt: started, Exit: "exit code 1", Restarts: 2, Errors: 1, Args: "--verbose"},
+		{Name: "api", Label: "API", State: "crashed", StartedAt: started, Exit: "exit code 1", Restarts: 2, Errors: 1, Args: "--verbose", Dir: "/wt/api"},
 	}
 	for i := range st.Processes {
 		st.Processes[i].StartedAt = st.Processes[i].StartedAt.UTC()
@@ -366,13 +369,22 @@ func TestActions(t *testing.T) {
 		{Op: OpStart, Names: []string{"backend", "web"}}, // anything: the supervisor resolves names
 		{Op: OpStop, Names: []string{"db"}},
 		{Op: OpRestart, Names: []string{"api", "db"}},
+		// Dirs are set first, by name; stop leaves them alone.
+		{Op: OpStart, Names: []string{"web"}, Dirs: map[string]string{"web": "/wt/web", "api": "/wt/api"}},
+		{Op: OpStop, Names: []string{"db"}, Dirs: map[string]string{"db": "/wt/db"}},
+		{Op: OpRestart, Names: []string{"db"}, Dirs: map[string]string{"db": "/wt/db"}},
 	} {
 		replies, err := collect(t, s.Path(), req)
 		if err != nil || len(replies) != 1 || replies[0].Status == nil || len(replies[0].Status.Processes) != 3 {
 			t.Errorf("%+v: %+v, %v", req, replies, err)
 		}
 	}
-	want := []string{"start backend,web", "stop db", "restart api", "restart db"}
+	want := []string{
+		"start backend,web", "stop db", "restart api", "restart db",
+		"dir api=/wt/api", "dir web=/wt/web", "start web",
+		"stop db",
+		"dir db=/wt/db", "restart db",
+	}
 	if got := target.recorded(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls = %q", got)
 	}
@@ -385,6 +397,7 @@ func TestActions(t *testing.T) {
 		{Request{Op: OpRestart}, "no projects to restart"},
 		{Request{Op: OpRestart, Names: []string{"broken"}}, "broken: it broke"},
 		{Request{Op: OpStart, Names: []string{"broken"}}, "it broke"},
+		{Request{Op: OpStart, Names: []string{"web"}, Dirs: map[string]string{"broken": "/wt"}}, "it broke"},
 		{Request{Op: OpDown}, "this session can't be stopped from outside"},
 	}
 	for _, c := range errs {

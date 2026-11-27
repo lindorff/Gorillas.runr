@@ -55,6 +55,7 @@ type ProcInfo struct {
 	Exit      ExitStatus       `json:"exit"`
 	Restarts  int              `json:"restarts,omitempty"`
 	Args      string           `json:"args,omitempty"`
+	Dir       string           `json:"dir,omitempty"`
 	Errors    int              `json:"errors,omitempty"`
 }
 
@@ -71,7 +72,7 @@ func procInfo(in supervisor.ProcessInfo) ProcInfo {
 	if in.Exit.Err != nil {
 		e.Err = in.Exit.Err.Error()
 	}
-	return ProcInfo{Name: in.Name, State: in.State, Pid: in.Pid, StartedAt: in.StartedAt, Exit: e, Restarts: in.Restarts, Args: in.Args, Errors: in.Errors}
+	return ProcInfo{Name: in.Name, State: in.State, Pid: in.Pid, StartedAt: in.StartedAt, Exit: e, Restarts: in.Restarts, Args: in.Args, Dir: in.Dir, Errors: in.Errors}
 }
 
 func (p ProcInfo) info() supervisor.ProcessInfo {
@@ -79,7 +80,7 @@ func (p ProcInfo) info() supervisor.ProcessInfo {
 	if p.Exit.Err != "" {
 		e.Err = errors.New(p.Exit.Err)
 	}
-	return supervisor.ProcessInfo{Name: p.Name, State: p.State, Pid: p.Pid, StartedAt: p.StartedAt, Exit: e, Restarts: p.Restarts, Args: p.Args, Errors: p.Errors}
+	return supervisor.ProcessInfo{Name: p.Name, State: p.State, Pid: p.Pid, StartedAt: p.StartedAt, Exit: e, Restarts: p.Restarts, Args: p.Args, Dir: p.Dir, Errors: p.Errors}
 }
 
 // Event is a supervisor.Event on the wire: one of its fields is set.

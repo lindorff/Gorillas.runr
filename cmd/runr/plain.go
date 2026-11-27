@@ -26,14 +26,14 @@ type plainColors struct {
 // prints their output interleaved, one line per output line, until every
 // project has finished. The first signal on sigs stops everything
 // gracefully; a second one kills it.
-func runPlain(out io.Writer, cfg *config.Config, opts supervisor.Options, names []string, args map[string]string, projects []string, sigs chan os.Signal, colors plainColors) error {
+func runPlain(out io.Writer, cfg *config.Config, opts supervisor.Options, names []string, args, dirs map[string]string, projects []string, sigs chan os.Signal, colors plainColors) error {
 	pr := newPlainPrinter(out, cfg, projects, colors)
 	sess := newRecordingSession(cfg, opts)
 	sup := sess.Supervisor
 	if cols := pr.textWidth(); cols > 0 {
 		_ = sup.Resize(cols, 0) // for pty = true; otherwise the default 120
 	}
-	if err := sess.begin(names, args); err != nil {
+	if err := sess.begin(names, args, dirs); err != nil {
 		sup.Close()
 		return err
 	}

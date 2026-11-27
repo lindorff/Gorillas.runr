@@ -137,6 +137,65 @@ func TestLogViewWrapping(t *testing.T) {
 	}
 }
 
+func TestLogViewScrollRows(t *testing.T) {
+	v := newTestView(10, 4)
+	v.scrollUp(3)
+	checkRows(t, v, "3", "4", "5", "6")
+	if v.following() {
+		t.Fatal("following after scrolling up")
+	}
+	v.scrollUp(5) // stops at the top
+	checkRows(t, v, "0", "1", "2", "3")
+	v.scrollUp(1)
+	checkRows(t, v, "0", "1", "2", "3")
+	v.append(numbered(11)[10]) // a paused view stays put
+	checkRows(t, v, "0", "1", "2", "3")
+	v.scrollDown(2)
+	checkRows(t, v, "2", "3", "4", "5")
+	v.scrollDown(5) // the newest line reaches the bottom: following again
+	checkRows(t, v, "7", "8", "9", "10")
+	if !v.following() {
+		t.Fatal("not following after scrolling to the end")
+	}
+	v.scrollDown(1)
+	checkRows(t, v, "7", "8", "9", "10")
+}
+
+func TestLogViewScrollWrapped(t *testing.T) {
+	v := newLogView(100, plainFormat)
+	v.setSize(4, 3)
+	v.append(
+		supervisor.LogLine{Text: "a"},
+		supervisor.LogLine{Text: "bbbbbbbbbb"}, // 3 rows
+		supervisor.LogLine{Text: "c"},
+	)
+	checkRows(t, v, "bbbb", "bb", "c")
+	v.scrollUp(1) // a row at a time, within the wrapped line
+	checkRows(t, v, "bbbb", "bbbb", "bb")
+	v.scrollUp(1)
+	checkRows(t, v, "a", "bbbb", "bbbb")
+	v.scrollDown(1)
+	checkRows(t, v, "bbbb", "bbbb", "bb")
+	if v.following() {
+		t.Fatal("following before the end")
+	}
+	v.scrollDown(1)
+	checkRows(t, v, "bbbb", "bb", "c")
+	if !v.following() {
+		t.Fatal("not following at the end")
+	}
+}
+
+func TestLogViewScrollEmpty(t *testing.T) {
+	v := newTestView(0, 4)
+	v.scrollUp(3)
+	v.scrollDown(3)
+	checkRows(t, v)
+	if !v.following() {
+		t.Fatal("an empty view stopped following")
+	}
+}
+
 func TestLogViewHugeLine(t *testing.T) {
 	v := newLogView(100, plainFormat)
 	v.setSize(2, 3)

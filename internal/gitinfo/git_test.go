@@ -132,7 +132,7 @@ func TestFind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Repo{Root: root, GitDir: filepath.Join(root, ".git")}
+	want := Repo{Root: root, GitDir: filepath.Join(root, ".git"), CommonDir: filepath.Join(root, ".git")}
 	if repo != want {
 		t.Errorf("Find = %+v, want %+v", repo, want)
 	}
@@ -157,7 +157,7 @@ func TestFindWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Repo{Root: wt, GitDir: filepath.Join(root, ".git", "worktrees", "wt")}
+	want := Repo{Root: wt, GitDir: filepath.Join(root, ".git", "worktrees", "wt"), CommonDir: filepath.Join(root, ".git")}
 	if repo != want {
 		t.Errorf("Find = %+v, want %+v", repo, want)
 	}
